@@ -1,0 +1,58 @@
+---
+- name: Configure VM with Dockerized app + monitoring
+  hosts: all
+  become: true
+  vars:
+    image_repo: "{{ lookup('env', 'IMAGE_REPO') | default('yourdockerhub/flask-hello') }}"
+    image_tag: "{{ lookup('env', 'IMAGE_TAG') | default('latest') }}"
+    grafana_admin_password: "{{ lookup('env', 'GRAFANA_ADMIN_PASSWORD') | default('admin') }}"
+  tasks:
+    - name: Update apt cache
+      apt: update_cache=yes cache_valid_time=600
+
+    - name: Install docker and compose plugin
+      apt:
+        name:
+          - docker.io
+          - docker-compose-plugin
+        state: present
+
+    - name: Ensure docker service started
+      service: name=docker state=started enabled=yes
+
+    - name: Create directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - /opt/monitoring
+        - /opt/app
+
+    - name: Copy Prometheus config
+      copy:
+        src: files/prometheus.yml
+        dest: /opt/monitoring/prometheus.yml
+        mode: "0644"
+
+    - name: Copy Grafana datasource provisioning
+      copy:
+        src: files/grafana-datasource.yml
+        dest: /opt/monitoring/grafana-datasource.yml
+        mode: "0644"
+
+    - name: Template docker-compose
+      template:
+        src: templates/docker-compose.yml.j2
+        dest: /opt/app/docker-compose.yml
+        mode: "0644"
+      vars:
+        templ_image_repo: "{{ image_repo }}"
+        templ_image_tag:  "{{ image_tag }}"
+        templ_grafana_admin_password: "{{ grafana_admin_password }}"
+
+    - name: Pull images
+      command: docker compose -f /opt/app/docker-compose.yml pull
+
+    - name: Up stack
+      command: docker compose -f /opt/app/docker-compose.yml up -d

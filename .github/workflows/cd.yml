@@ -1,0 +1,66 @@
+name: CD - Provision & Deploy
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "app/**"
+      - "ansible/**"
+      - "terraform/**"
+      - ".github/workflows/**"
+
+env:
+  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/flask-hello
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ secrets.AWS_REGION }}
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: terraform init
+
+      - name: Terraform Apply
+        id: tf
+        working-directory: terraform
+        env:
+          TF_VAR_public_key: ${{ secrets.TF_VAR_public_key }}
+        run: |
+          terraform apply -auto-approve
+          IP=$(terraform output -raw public_ip)
+          echo "PUBLIC_IP=$IP" >> $GITHUB_ENV
+          echo "public_ip=$IP"  >> $GITHUB_OUTPUT
+
+      - name: Prepare SSH key
+        run: |
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > id_ed25519
+          chmod 600 id_ed25519
+
+      - name: Run Ansible playbook
+        uses: dawidd6/action-ansible-playbook@v2
+        with:
+          playbook: ansible/site.yml
+          inventory: |
+            [all]
+            ${{ env.PUBLIC_IP }} ansible_user=ubuntu ansible_ssh_private_key_file=./id_ed25519
+          requirements: ""
+          options: |
+            -e IMAGE_REPO=${{ env.IMAGE_NAME }}
+            -e IMAGE_TAG=${{ github.sha }}
+            -e GRAFANA_ADMIN_PASSWORD=${{ secrets.GRAFANA_ADMIN_PASSWORD }}
