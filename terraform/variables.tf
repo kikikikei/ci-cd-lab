@@ -1,6 +1,6 @@
 variable "region" {
   type    = string
-  default = "us-east-1"
+  default = "ca-central-1"
 }
 
 variable "public_key" {
